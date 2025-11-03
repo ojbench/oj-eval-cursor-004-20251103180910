@@ -199,8 +199,15 @@ private:
     vector<Transaction> transactions;
     vector<LogEntry> logs;
     
-    stack<pair<string, int>> loginStack; // userID, privilege
-    map<string, string> selectedBooks; // userID -> selected ISBN
+    struct LoginSession {
+        string userID;
+        int privilege;
+        string selectedISBN;
+        
+        LoginSession(const string& uid, int priv) : userID(uid), privilege(priv), selectedISBN("") {}
+    };
+    
+    stack<LoginSession> loginStack;
     
     bool initialized;
     
@@ -289,12 +296,26 @@ private:
     
     int getCurrentPrivilege() {
         if (loginStack.empty()) return 0;
-        return loginStack.top().second;
+        return loginStack.top().privilege;
     }
     
     string getCurrentUserID() {
         if (loginStack.empty()) return "";
-        return loginStack.top().first;
+        return loginStack.top().userID;
+    }
+    
+    string getSelectedISBN() {
+        if (loginStack.empty()) return "";
+        return loginStack.top().selectedISBN;
+    }
+    
+    void setSelectedISBN(const string& isbn) {
+        if (!loginStack.empty()) {
+            LoginSession session = loginStack.top();
+            loginStack.pop();
+            session.selectedISBN = isbn;
+            loginStack.push(session);
+        }
     }
     
     void addLog(const string& op, const string& details = "") {
@@ -347,7 +368,7 @@ public:
             if (string(acc.password) != password) return false;
         }
         
-        loginStack.push({userID, acc.privilege});
+        loginStack.push(LoginSession(userID, acc.privilege));
         addLog("su", userID);
         return true;
     }
@@ -358,11 +379,6 @@ public:
         
         string userID = getCurrentUserID();
         loginStack.pop();
-        
-        // Clear selected book for this user
-        if (selectedBooks.find(userID) != selectedBooks.end()) {
-            selectedBooks.erase(userID);
-        }
         
         addLog("logout", userID);
         return true;
@@ -451,9 +467,9 @@ public:
         if (accounts.find(userID) == accounts.end()) return false;
         
         // Check if user is logged in
-        stack<pair<string, int>> tempStack = loginStack;
+        stack<LoginSession> tempStack = loginStack;
         while (!tempStack.empty()) {
-            if (tempStack.top().first == userID) return false;
+            if (tempStack.top().userID == userID) return false;
             tempStack.pop();
         }
         
@@ -605,8 +621,7 @@ public:
             books[isbn] = newBook;
         }
         
-        string userID = getCurrentUserID();
-        selectedBooks[userID] = isbn;
+        setSelectedISBN(isbn);
         
         addLog("select", isbn);
         return true;
@@ -616,10 +631,8 @@ public:
         if (params.size() < 2) return false;
         if (getCurrentPrivilege() < 3) return false;
         
-        string userID = getCurrentUserID();
-        if (selectedBooks.find(userID) == selectedBooks.end()) return false;
-        
-        string isbn = selectedBooks[userID];
+        string isbn = getSelectedISBN();
+        if (isbn.empty()) return false;
         
         set<string> paramTypes;
         string newISBN = "";
@@ -686,7 +699,7 @@ public:
             books[newISBN] = book;
             strcpy(books[newISBN].ISBN, newISBN.c_str());
             books.erase(isbn);
-            selectedBooks[userID] = newISBN;
+            setSelectedISBN(newISBN);
         }
         
         addLog("modify");
@@ -697,8 +710,8 @@ public:
         if (params.size() != 3) return false;
         if (getCurrentPrivilege() < 3) return false;
         
-        string userID = getCurrentUserID();
-        if (selectedBooks.find(userID) == selectedBooks.end()) return false;
+        string isbn = getSelectedISBN();
+        if (isbn.empty()) return false;
         
         string quantityStr = params[1];
         string totalCostStr = params[2];
@@ -711,7 +724,6 @@ public:
         
         if (totalCost <= 0) return false;
         
-        string isbn = selectedBooks[userID];
         Book& book = books[isbn];
         book.quantity += quantity;
         
